@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hermes Stock Sentinel v1.0.0</title>
+  <link rel="stylesheet" href="./styles.css?v=20260425b" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <p class="eyebrow">Hermes Sentinel</p>
+        <h1>股农守护台</h1>
+        <p class="lead">v1.0.0 单用户股票监控工作台，核心目标是盯盘、预警、保收益、快响应。</p>
+      </div>
+
+      <section class="panel">
+        <h2>搜索与关注</h2>
+        <div class="search-stack">
+          <div class="search-box">
+            <input id="symbolInput" type="text" autocomplete="off" placeholder="输入股票代码或名称，如 688766 / NVDA / 普冉股份" />
+            <div id="searchSuggestions" class="search-suggestions hidden"></div>
+          </div>
+          <div class="button-row">
+            <button id="searchBtn" class="primary" type="button">搜索并自动关注</button>
+            <button id="followBtn" type="button">手动加入关注</button>
+          </div>
+          <div class="button-row">
+            <button id="unfollowBtn" type="button">移出关注</button>
+            <button id="resetBtn" type="button">重置默认关注池</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>监控模式</h2>
+        <div class="stack compact">
+          <label>
+            <span>市场范围</span>
+            <select id="marketScope">
+              <option value="us">美股</option>
+              <option value="cn">A股</option>
+              <option value="mixed">跨市场</option>
+            </select>
+          </label>
+          <label>
+            <span>Hermes 风控档位</span>
+            <select id="hermesMode">
+              <option value="normal">正常监控</option>
+              <option value="defensive">防守优先</option>
+              <option value="crash">崩坏守卫</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Hermes 当前任务</h2>
+        <div id="systemStatus" class="stack compact"></div>
+      </section>
+
+      <section class="panel">
+        <h2>最近搜索</h2>
+        <div id="recentSearches" class="pill-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>关注池</h2>
+        <div id="watchlist" class="watchlist"></div>
+      </section>
+
+      <section class="panel muted">
+        <h2>V1.0.0 工作流</h2>
+        <div id="workflowChecklist" class="stack compact"></div>
+      </section>
+    </aside>
+
+    <main class="content">
+      <header class="content-head">
+        <div>
+          <p class="eyebrow">Hermes Control Desk</p>
+          <h2 id="selectedTitle">AAPL</h2>
+        </div>
+        <div id="marketStatus" class="market-status"></div>
+      </header>
+
+      <section class="overview-grid" id="overviewGrid"></section>
+
+      <section class="hero-grid">
+        <article class="hero-card quote-card">
+          <div class="hero-top">
+            <div>
+              <p class="meta-label">实时股票信息</p>
+              <h3 id="lastPrice">--</h3>
+            </div>
+            <div id="priceBadge" class="price-badge">--</div>
+          </div>
+          <div class="quote-grid" id="quoteGrid"></div>
+        </article>
+
+        <article class="hero-card chart-card">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">Hermes 风险态势</p>
+              <h3>Signal Pulse</h3>
+            </div>
+            <span id="signalLabel" class="signal-chip">--</span>
+          </div>
+          <div id="sparkline" class="sparkline"></div>
+          <div id="intradaySummary" class="muted card-summary"></div>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">Hermes 风控镜头</p>
+              <h3>Protection Scores</h3>
+            </div>
+          </div>
+          <div id="analysisCards" class="analysis-grid"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">优先查看</p>
+              <h3>关注股排行与详情</h3>
+            </div>
+          </div>
+          <div id="priorityTable" class="table-shell"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">Hermes 快讯</p>
+              <h3>紧急事件流</h3>
+            </div>
+          </div>
+          <div id="newsFeed" class="stack"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">风险检查</p>
+              <h3>保收益检查单</h3>
+            </div>
+          </div>
+          <div id="riskChecklist" class="stack"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">Hermes 策略规则</p>
+              <h3>提醒规则面板</h3>
+            </div>
+          </div>
+          <div id="strategyPanel" class="stack"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">Hermes 告警中心</p>
+              <h3>Alert Center</h3>
+            </div>
+          </div>
+          <div id="alertCenter" class="stack"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">K线与量价</p>
+              <h3>K-Line Lens</h3>
+            </div>
+          </div>
+          <div id="klinePanel" class="stack"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">持仓逻辑</p>
+              <h3>Position Logic</h3>
+            </div>
+          </div>
+          <div id="positionPanel" class="stack"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">投资判断</p>
+              <h3>Decision</h3>
+            </div>
+          </div>
+          <div id="decisionPanel" class="stack"></div>
+        </article>
+
+        <article class="panel panel-strong">
+          <div class="card-head">
+            <div>
+              <p class="meta-label">Hermes 对话</p>
+              <h3>控制台问答</h3>
+            </div>
+          </div>
+          <div class="search-stack">
+            <input id="hermesInput" type="text" placeholder="例如：当前最危险的股票是谁？" />
+            <div class="button-row">
+              <button id="hermesAskBtn" class="primary" type="button">询问 Hermes</button>
+              <button id="hermesPresetBtn" type="button">风险总览</button>
+            </div>
+          </div>
+          <div id="hermesResponse" class="response-card"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js?v=20260425b" defer></script>
+</body>
+</html>
