@@ -32,12 +32,28 @@ if lsof -tiTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -n "${HERMES_PYTHON_BIN:-}" ]] && [[ -x "${HERMES_PYTHON_BIN}" ]]; then
-  PYTHON_BIN="${HERMES_PYTHON_BIN}"
-elif [[ -x "${PROJECT_ROOT}/.venv/bin/python" ]]; then
-  PYTHON_BIN="${PROJECT_ROOT}/.venv/bin/python"
-else
-  PYTHON_BIN="$(command -v python3)"
+PYTHON_BIN=""
+PYTHON_CANDIDATES=()
+if [[ -n "${HERMES_PYTHON_BIN:-}" ]]; then
+  PYTHON_CANDIDATES+=("${HERMES_PYTHON_BIN}")
+fi
+PYTHON_CANDIDATES+=("${PROJECT_ROOT}/.venv/bin/python")
+for candidate in python3.11 python3.10 python3; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    PYTHON_CANDIDATES+=("$(command -v "$candidate")")
+  fi
+done
+
+for candidate in "${PYTHON_CANDIDATES[@]}"; do
+  if [[ -x "$candidate" ]] && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "Python 3.10+ is required. Set HERMES_PYTHON_BIN or create .venv with Python 3.10+."
+  exit 1
 fi
 
 nohup "$PYTHON_BIN" -m uvicorn server:app --host "$HOST" --port "$PORT" >"$SERVER_LOG" 2>&1 &

@@ -481,6 +481,141 @@ h3 {
   color: var(--muted);
 }
 
+.danger-text,
+.provider-meta.danger-text {
+  color: var(--danger);
+}
+
+.kline-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.kline-header,
+.kline-chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
+.kline-badges,
+.kline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kline-chart-shell {
+  padding: 0.9rem;
+  border-radius: 20px;
+  border: 1px solid rgba(14, 34, 48, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(239, 245, 249, 0.94)),
+    radial-gradient(circle at top right, rgba(14, 124, 102, 0.08), transparent 28%);
+}
+
+.kline-legend {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.kline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-dot.up {
+  background: var(--accent);
+}
+
+.legend-dot.down {
+  background: var(--danger);
+}
+
+.legend-dot.ma5 {
+  background: #d08717;
+}
+
+.legend-dot.ma20 {
+  background: #2c6bb2;
+}
+
+.kline-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.kline-grid,
+.kline-volume-axis {
+  stroke: rgba(14, 34, 48, 0.12);
+  stroke-width: 1;
+}
+
+.kline-axis-text {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.kline-wick,
+.kline-body,
+.kline-volume {
+  vector-effect: non-scaling-stroke;
+}
+
+.kline-wick.up,
+.kline-body.up,
+.kline-volume.up {
+  stroke: var(--accent);
+  fill: rgba(14, 124, 102, 0.82);
+}
+
+.kline-wick.down,
+.kline-body.down,
+.kline-volume.down {
+  stroke: var(--danger);
+  fill: rgba(196, 73, 58, 0.82);
+}
+
+.kline-ma-line {
+  fill: none;
+  stroke-width: 2.1;
+  vector-effect: non-scaling-stroke;
+}
+
+.kline-ma-line.ma5 {
+  stroke: #d08717;
+}
+
+.kline-ma-line.ma20 {
+  stroke: #2c6bb2;
+}
+
+.kline-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.kline-metric span {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.kline-metric strong {
+  margin-top: 0.32rem;
+}
+
 .compact-item {
   padding: 0.72rem 0.8rem;
 }
@@ -592,5 +727,14 @@ th {
   .content-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .kline-header,
+  .kline-chart-header {
+    flex-direction: column;
+  }
+
+  .kline-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

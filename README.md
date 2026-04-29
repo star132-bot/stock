@@ -4,7 +4,7 @@
 
 当前实现版本：
 
-- `v1.0.0`
+- `v1.0.0` 已完成
 
 当前版本目标：
 
@@ -14,18 +14,71 @@
 - 在股市异动和紧急崩坏时提醒用户
 - 帮助用户保住收益并快速响应
 
+## v1.0.0 已完成功能
+
+### 股票搜索与关注
+
+- 支持 A 股代码和名称搜索
+- 支持裸代码输入，例如 `688766`
+- 搜索命中后自动加入关注池
+- 支持最近搜索记录
+- 支持关注池增删和默认关注池重置
+
+### 实时行情与看板
+
+- 支持 A 股腾讯实时行情刷新
+- 支持单股和关注池批量刷新
+- 支持市场总览、实时价格、涨跌幅、成交量、量比、振幅、买卖价差
+- 真实行情股票参与 Hermes 风险排行，静态样本不参与风险排行
+
+### K 线与技术分析
+
+- 支持日 K 线图展示
+- 支持 MA5 / MA10 / MA20 / MA60
+- 支持成交量均线
+- 支持支撑位、压力位、趋势标签、量价总结
+- K 线数据源优先使用 `akshare`，失败后自动回退到腾讯 K 线接口
+- 历史 K 线会缓存到 `.runtime/kline_cache/`
+
+### Hermes 风控
+
+- 动量分
+- 流动性分
+- 波动稳定度
+- 收益保护分
+- 风险标签
+- 风险等级
+- 关注股风险优先级排行
+- 风险检查清单
+- Hermes 快讯事件流
+
+### 持仓与投资判断
+
+- 支持通过 `/api/positions` 写入持仓数量、成本价、止损位、目标位、持有周期和买入逻辑
+- 支持 `/api/analysis/decision` 生成继续持有 / 观察 / 减仓 / 卖出判断
+- K 线不可用时，行情和投资判断仍会返回，页面会显示明确错误，不再空白
+
+### 告警与复盘
+
+- 支持 `/api/monitor/run-once` 手动运行一次监控
+- 支持告警去重和 cooldown
+- 支持 outbox 待发送队列
+- 支持 Server 酱、PushPlus、企业微信机器人
+- 支持每晚 21:00 生成复盘总结文档
+
 ## 当前内容
 
 - `index.html`: 页面入口
 - `styles.css`: Hermes 工作台样式
-- `app.js`: 前端交互、模拟实时推送、Hermes 风控逻辑
-- `server.py`: 搜索、行情、监控、风险摘要 API
+- `app.js`: 前端交互、实时刷新、K 线渲染、Hermes 风控展示
+- `server.py`: 搜索、行情、K 线、监控、风险摘要 API
 - `sender.py`: 待发送告警 outbox sender
 - `docs/DATA_PROVIDER_RESEARCH.md`: 实时数据源调研
 - `docs/ANALYSIS_ENGINE_PLAN.md`: 专业化股票分析处理机制
 - `docs/LIVE_INTEGRATION_BLUEPRINT.md`: 真实接入蓝图与标准化字段建议
 - `docs/V1_0_0_PRODUCT_SPEC.md`: `v1.0.0` 功能定义
 - `docs/V1_0_0_WORKFLOW.md`: `v1.0.0` 工作流
+- `docs/V1_0_0_RELEASE.md`: `v1.0.0` 发布说明
 - `docs/HERMES_PROJECT_OVERVIEW.md`: 项目全功能概要
 - `docs/HERMES_OPERATOR_RUNBOOK.md`: Hermes 使用与运维手册
 
@@ -35,7 +88,7 @@
 
 ```bash
 cd stock-realtime-dashboard
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -49,6 +102,80 @@ bash scripts/start_local_server.sh
 然后打开：
 
 - `http://127.0.0.1:8130`
+
+如果机器上默认 `python3` 低于 3.10，可以指定 Python：
+
+```bash
+HERMES_PYTHON_BIN=/path/to/python3.11 bash scripts/start_local_server.sh
+```
+
+## 页面使用方式
+
+1. 打开 `http://127.0.0.1:8130`
+2. 在左侧搜索框输入股票代码或名称，例如 `688766`
+3. 点击“搜索并自动关注”
+4. 在关注池中点击股票切换当前标的
+5. 查看实时行情、Hermes 风险分、K 线图、持仓逻辑和投资判断
+6. 如需录入持仓，用 `/api/positions` 写入成本、止损和目标价
+7. 如需生成告警，用 `/api/monitor/run-once` 手动运行一次监控
+
+## Hermes 连接方式
+
+这里的 Hermes 由三部分组成：
+
+- 前端 Hermes 控制台：页面里的风险展示、快讯和问答区
+- 后端 Hermes 风控引擎：`server.py`、`alert_engine.py`、`technical_analysis.py`
+- Hermes 告警发送器：`sender.py` 和 `scripts/send_pending_alerts.py`
+
+### 1. 配置关注股票
+
+```bash
+curl -X POST http://127.0.0.1:8130/api/watchlist \
+  -H 'Content-Type: application/json' \
+  -d '{"symbol":"688766.SH","note":"芯片观察"}'
+```
+
+### 2. 配置 Hermes 告警目标
+
+支持三类目标：
+
+- `serverchan:SCTxxxxxxxx`
+- `pushplus:token`
+- `wecom_bot:key`
+
+示例：
+
+```bash
+curl -X POST http://127.0.0.1:8130/api/monitor/config \
+  -H 'Content-Type: application/json' \
+  -d '{"target":"pushplus:YOUR_TOKEN","cooldown_minutes":15,"min_level":"medium"}'
+```
+
+### 3. 运行一次 Hermes 监控
+
+```bash
+curl -X POST 'http://127.0.0.1:8130/api/monitor/run-once?hermes_mode=normal'
+```
+
+这一步会：
+
+- 拉取关注池行情
+- 计算风险分
+- 生成风险事件
+- 写入 `.runtime/outbox.json`
+- 保存监控记录和分析快照
+
+### 4. 发送 Hermes 告警
+
+```bash
+python3 scripts/send_pending_alerts.py
+```
+
+重试失败告警：
+
+```bash
+python3 scripts/send_pending_alerts.py --retry-failed
+```
 
 ## 公网预览
 
@@ -120,43 +247,18 @@ python3 scripts/send_pending_alerts.py --retry-failed
 
 ## 当前状态
 
-这是一个前端原型，不直接请求真实行情接口。
-
-当前原型已经包含：
-
-- 搜索股票
-- 支持裸代码搜索（如 `688766`）
-- 搜索命中后自动加入关注池
-- 最近搜索记录
-- 关注池管理
-- A 股实时行情接口刷新
-- 真实行情股票参与 Hermes 风险排行，静态样本不参与
-- 市场总览卡片
-- Hermes 多维保护评分
-- 风险检查与快讯提醒
-- 关注股风险优先级排行
-- Hermes 告警中心
-- K线与量价分析面板
-- 持仓逻辑面板
-- 投资判断面板
-- `/api/analysis/kline`
-- `/api/analysis/decision`
-- `/api/positions`
-- Hermes 对话控制台
-- `/api/risk-summary` 后端风险摘要
-- `/api/monitor/run-once` 一次性监控循环
-- outbox 告警发送
-- 每晚 9 点总结脚本
+`v1.0.0` 已完成并可本地运行。当前系统已经接入真实 A 股行情、K 线数据、Hermes 风控分析、告警 outbox 和夜间总结。
 
 运行与使用文档：
 
 - `docs/HERMES_PROJECT_OVERVIEW.md`
 - `docs/HERMES_OPERATOR_RUNBOOK.md`
+- `docs/V1_0_0_RELEASE.md`
 
-下一步可以按文档里的方案接入：
+后续版本可以继续接入：
 
 - Polygon / Massive
 - Alpaca Market Data
 - Tushare
 
-并将模拟数据替换为真实数据流。
+并扩展为多用户、后台常驻监控和更完整的策略回测。

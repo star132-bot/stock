@@ -1027,20 +1027,207 @@ function renderStrategyPanel(record, signal) {
   `).join("");
 }
 
+function toFiniteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatShortDate(value) {
+  const raw = String(value || "");
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    return `${match[2]}-${match[3]}`;
+  }
+  return raw || "-";
+}
+
+function classByTechnicalScore(score) {
+  if (score >= 56) return "positive";
+  if (score <= 34) return "negative";
+  return "neutral";
+}
+
+function buildSvgPath(points) {
+  if (points.length < 2) return "";
+  return points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+}
+
+function buildMovingAveragePath(bars, window, xForIndex, yForPrice) {
+  const points = [];
+  const closes = [];
+  bars.forEach((bar, index) => {
+    closes.push(bar.close);
+    if (closes.length < window) return;
+    const average = closes.slice(-window).reduce((sum, value) => sum + value, 0) / window;
+    points.push({ x: xForIndex(index), y: yForPrice(average) });
+  });
+  return buildSvgPath(points);
+}
+
+function renderKlineChart(kline) {
+  const bars = (kline?.bars || []).map(bar => {
+    const open = toFiniteNumber(bar.open);
+    const close = toFiniteNumber(bar.close);
+    const high = toFiniteNumber(bar.high);
+    const low = toFiniteNumber(bar.low);
+    const volume = Math.max(0, toFiniteNumber(bar.volume) ?? 0);
+    if (open === null || close === null || high === null || low === null) {
+      return null;
+    }
+    return { ...bar, open, close, high, low, volume };
+  }).filter(Boolean);
+
+  if (!bars.length) {
+    return `
+      <div class="kline-chart-shell">
+        <p class="provider-meta">当前 K 线结果里没有可绘制的 bars 数据。</p>
+      </div>
+    `;
+  }
+
+  const width = 760;
+  const height = 320;
+  const paddingX = 18;
+  const drawableWidth = width - paddingX * 2;
+  const priceTop = 16;
+  const priceHeight = 188;
+  const volumeTop = 226;
+  const volumeHeight = 52;
+  const labelY = 304;
+
+  const highs = bars.map(bar => bar.high);
+  const lows = bars.map(bar => bar.low);
+  const maxPrice = Math.max(...highs);
+  const minPrice = Math.min(...lows);
+  const rawSpread = Math.max(maxPrice - minPrice, maxPrice * 0.02, 1);
+  const maxScale = maxPrice + rawSpread * 0.08;
+  const minScale = Math.max(0, minPrice - rawSpread * 0.08);
+  const scaleSpan = Math.max(maxScale - minScale, 1);
+  const maxVolume = Math.max(...bars.map(bar => bar.volume), 1);
+  const candleGap = drawableWidth / bars.length;
+  const candleWidth = Math.max(4, Math.min(10, candleGap * 0.64));
+  const xForIndex = index => paddingX + candleGap * index + candleGap / 2;
+  const yForPrice = price => priceTop + ((maxScale - price) / scaleSpan) * priceHeight;
+
+  const gridFractions = [0, 0.25, 0.5, 0.75, 1];
+  const grid = gridFractions.map(fraction => {
+    const y = priceTop + priceHeight * fraction;
+    const price = maxScale - scaleSpan * fraction;
+    return `
+      <line class="kline-grid" x1="${paddingX}" y1="${y.toFixed(2)}" x2="${(width - paddingX).toFixed(2)}" y2="${y.toFixed(2)}"></line>
+      <text class="kline-axis-text" x="${(width - 4).toFixed(2)}" y="${(y - 3).toFixed(2)}" text-anchor="end">${formatNumber(price)}</text>
+    `;
+  }).join("");
+
+  const candles = bars.map((bar, index) => {
+    const x = xForIndex(index);
+    const direction = bar.close >= bar.open ? "up" : "down";
+    const wickTop = yForPrice(bar.high);
+    const wickBottom = yForPrice(bar.low);
+    const bodyTop = yForPrice(Math.max(bar.open, bar.close));
+    const rawBodyHeight = Math.abs(yForPrice(bar.open) - yForPrice(bar.close));
+    const bodyHeight = Math.max(2, rawBodyHeight);
+    const bodyY = rawBodyHeight < 2 ? bodyTop - 1 : bodyTop;
+    const volumeHeightPx = Math.max(1.5, (bar.volume / maxVolume) * volumeHeight);
+    const volumeY = volumeTop + volumeHeight - volumeHeightPx;
+    return `
+      <line class="kline-wick ${direction}" x1="${x.toFixed(2)}" y1="${wickTop.toFixed(2)}" x2="${x.toFixed(2)}" y2="${wickBottom.toFixed(2)}"></line>
+      <rect class="kline-body ${direction}" x="${(x - candleWidth / 2).toFixed(2)}" y="${bodyY.toFixed(2)}" width="${candleWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="1.5"></rect>
+      <rect class="kline-volume ${direction}" x="${(x - candleWidth / 2).toFixed(2)}" y="${volumeY.toFixed(2)}" width="${candleWidth.toFixed(2)}" height="${volumeHeightPx.toFixed(2)}" rx="1.5"></rect>
+    `;
+  }).join("");
+
+  const ma5Path = buildMovingAveragePath(bars, 5, xForIndex, yForPrice);
+  const ma20Path = buildMovingAveragePath(bars, 20, xForIndex, yForPrice);
+  const startDate = formatShortDate(bars[0].date);
+  const endDate = formatShortDate(bars.at(-1)?.date);
+
+  return `
+    <div class="kline-chart-shell">
+      <div class="kline-chart-header">
+        <div class="kline-legend">
+          <span class="kline-legend-item"><span class="legend-dot up"></span>阳线</span>
+          <span class="kline-legend-item"><span class="legend-dot down"></span>阴线</span>
+          <span class="kline-legend-item"><span class="legend-dot ma5"></span>MA5</span>
+          <span class="kline-legend-item"><span class="legend-dot ma20"></span>MA20</span>
+        </div>
+        <div class="provider-meta">${startDate} 至 ${endDate} · ${bars.length} 根</div>
+      </div>
+      <svg class="kline-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="股票 K 线图">
+        ${grid}
+        <line class="kline-volume-axis" x1="${paddingX}" y1="${(volumeTop - 8).toFixed(2)}" x2="${(width - paddingX).toFixed(2)}" y2="${(volumeTop - 8).toFixed(2)}"></line>
+        ${candles}
+        ${ma5Path ? `<path class="kline-ma-line ma5" d="${ma5Path}"></path>` : ""}
+        ${ma20Path ? `<path class="kline-ma-line ma20" d="${ma20Path}"></path>` : ""}
+        <text class="kline-axis-text" x="${paddingX}" y="${labelY}">${startDate}</text>
+        <text class="kline-axis-text" x="${(width - paddingX).toFixed(2)}" y="${labelY}" text-anchor="end">${endDate}</text>
+        <text class="kline-axis-text" x="${paddingX}" y="${(volumeTop - 12).toFixed(2)}">VOL</text>
+      </svg>
+    </div>
+  `;
+}
+
 function renderKlinePanel() {
   const kline = state.decisionState?.kline;
+  const klineError = state.decisionState?.kline_error;
   if (!kline) {
     els.klinePanel.innerHTML = `<div class="provider-card"><strong>暂无K线分析</strong><p>选中一只真实行情 A 股后，系统会加载 K 线与量价分析。</p></div>`;
     return;
   }
+  if (!kline.bars?.length) {
+    els.klinePanel.innerHTML = `
+      <div class="provider-card kline-card">
+        <strong>${kline.trend_label || "暂无K线数据"}</strong>
+        <p>${kline.volume_price_summary || "当前没有可用于绘图的 K 线数据。"}</p>
+        ${klineError ? `<p class="provider-meta danger-text">${klineError}</p>` : ""}
+        <p class="provider-meta">如果这里提示获取失败，通常是历史行情数据源暂时不可达；已有缓存时系统会自动回退到缓存。</p>
+      </div>
+    `;
+    return;
+  }
   const ma = kline.ma || {};
   const vol = kline.volume_ma || {};
+  const latestBar = kline.latest_bar || kline.bars?.at(-1) || {};
+  const latestOpen = toFiniteNumber(latestBar.open);
+  const latestClose = toFiniteNumber(latestBar.close);
+  const latestHigh = toFiniteNumber(latestBar.high);
+  const latestLow = toFiniteNumber(latestBar.low);
+  const latestVolume = toFiniteNumber(latestBar.volume);
+  const technicalScore = Number.isFinite(Number(kline.technical_score)) ? Number(kline.technical_score) : 0;
   els.klinePanel.innerHTML = `
-    <div class="provider-card">
-      <strong>${kline.trend_label}</strong>
-      <p>${kline.volume_price_summary}</p>
+    <div class="provider-card kline-card">
+      <div class="kline-header">
+        <div>
+          <strong>${kline.trend_label}</strong>
+          <p>${kline.volume_price_summary}</p>
+        </div>
+        <div class="kline-badges">
+          <span class="signal-chip ${classByTechnicalScore(technicalScore)}">技术分 ${technicalScore}</span>
+          <span class="status-pill">${kline.technical_bias || "暂无判断"}</span>
+        </div>
+      </div>
+      ${renderKlineChart(kline)}
+      <div class="kline-meta-grid">
+        <div class="metric-card kline-metric">
+          <span>最新交易日</span>
+          <strong>${formatShortDate(latestBar.date)}</strong>
+        </div>
+        <div class="metric-card kline-metric">
+          <span>开 / 收</span>
+          <strong>${latestOpen !== null ? formatNumber(latestOpen) : "-"} / ${latestClose !== null ? formatNumber(latestClose) : "-"}</strong>
+        </div>
+        <div class="metric-card kline-metric">
+          <span>高 / 低</span>
+          <strong>${latestHigh !== null ? formatNumber(latestHigh) : "-"} / ${latestLow !== null ? formatNumber(latestLow) : "-"}</strong>
+        </div>
+        <div class="metric-card kline-metric">
+          <span>成交量</span>
+          <strong>${latestVolume !== null ? formatCompact(latestVolume) : "-"}</strong>
+        </div>
+      </div>
       <p class="provider-meta">MA5 ${ma.ma5 ?? "-"} · MA10 ${ma.ma10 ?? "-"} · MA20 ${ma.ma20 ?? "-"} · MA60 ${ma.ma60 ?? "-"}</p>
       <p class="provider-meta">量能 MA5 ${vol.ma5 ?? "-"} · MA20 ${vol.ma20 ?? "-"} · 支撑 ${kline.support_price ?? "-"} · 压力 ${kline.resistance_price ?? "-"}</p>
+      ${klineError ? `<p class="provider-meta danger-text">${klineError}</p>` : ""}
     </div>
   `;
 }

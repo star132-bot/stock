@@ -277,19 +277,98 @@ def _fetch_daily_kline(symbol: str, limit: int = 120) -> list[dict[str, Any]]:
     return rows
 
 
+def _fetch_tencent_daily_kline(symbol: str, limit: int = 120) -> list[dict[str, Any]]:
+    tencent_symbol = _tencent_symbol(symbol)
+    url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    response = _http_session().get(
+        url,
+        params={"param": f"{tencent_symbol},day,,,{limit},qfq"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    symbol_payload = (payload.get("data") or {}).get(tencent_symbol) or {}
+    raw_rows = symbol_payload.get("qfqday") or symbol_payload.get("day") or []
+
+    rows: list[dict[str, Any]] = []
+    for item in raw_rows[-limit:]:
+        if not isinstance(item, list) or len(item) < 6:
+            continue
+        open_price = float(item[1] or 0)
+        close_price = float(item[2] or 0)
+        high_price = float(item[3] or 0)
+        low_price = float(item[4] or 0)
+        volume = float(item[5] or 0)
+        prev_close = rows[-1]["close"] if rows else close_price
+        change_abs = close_price - prev_close
+        rows.append(
+            {
+                "date": str(item[0]),
+                "open": open_price,
+                "close": close_price,
+                "high": high_price,
+                "low": low_price,
+                "volume": volume,
+                "turnover": 0,
+                "amplitude_pct": round((high_price - low_price) / prev_close * 100, 2) if prev_close else 0,
+                "change_pct": round(change_abs / prev_close * 100, 2) if prev_close else 0,
+                "change_abs": round(change_abs, 2),
+                "turnover_rate": 0,
+            }
+        )
+
+    if rows:
+        save_kline_snapshot(symbol, rows)
+    return rows
+
+
+def _load_daily_kline(symbol: str, limit: int = 120) -> list[dict[str, Any]]:
+    errors: list[str] = []
+    try:
+        rows = _fetch_daily_kline(symbol, limit=limit)
+        if rows:
+            return rows
+    except Exception as exc:
+        errors.append(f"akshare: {exc}")
+
+    try:
+        rows = _fetch_tencent_daily_kline(symbol, limit=limit)
+        if rows:
+            return rows
+    except Exception as exc:
+        errors.append(f"tencent: {exc}")
+
+    cached = load_kline_snapshot(symbol)
+    cached_rows = list(cached.get("bars") or []) if cached else []
+    if cached_rows:
+        return cached_rows[-limit:]
+
+    detail = "；".join(errors) if errors else "无可用数据源"
+    raise HTTPException(status_code=502, detail=f"K线获取失败: {detail}")
+
+
 def _build_symbol_analysis(symbol: str, hermes_mode: str = "normal") -> dict[str, Any]:
     normalized = _normalize_watch_symbol(symbol)
     quotes = _fetch_quotes([normalized])
     if not quotes:
         raise HTTPException(status_code=404, detail="未获取到实时行情")
     quote = analyze_quote(quotes[0], hermes_mode=hermes_mode)
-    kline_rows = _fetch_daily_kline(normalized)
+    kline_error = None
+    try:
+        kline_rows = _load_daily_kline(normalized)
+    except HTTPException as exc:
+        kline_rows = []
+        kline_error = str(exc.detail)
+    except Exception as exc:
+        kline_rows = []
+        kline_error = f"K线获取失败: {exc}"
     kline_analysis = analyze_kline_rows(kline_rows)
     position = _load_positions_by_symbol().get(normalized)
     decision = analyze_position_logic(quote, kline_analysis, position)
     return {
         "quote": quote,
         "kline": kline_analysis,
+        "kline_error": kline_error,
         "position": position,
         "decision": decision,
     }
@@ -556,13 +635,7 @@ def upsert_position(payload: PositionUpsertRequest) -> dict[str, Any]:
 @app.get("/api/analysis/kline")
 def analysis_kline(symbol: str = Query(...), limit: int = Query(default=120, ge=30, le=300)) -> dict[str, Any]:
     normalized = _normalize_watch_symbol(symbol)
-    try:
-        rows = _fetch_daily_kline(normalized, limit=limit)
-    except Exception:
-        cached = load_kline_snapshot(normalized)
-        if not cached:
-            raise
-        rows = list(cached.get("bars") or [])[-limit:]
+    rows = _load_daily_kline(normalized, limit=limit)
     return {"symbol": normalized, "kline": analyze_kline_rows(rows)}
 
 
