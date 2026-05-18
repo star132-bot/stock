@@ -349,10 +349,41 @@ def _load_daily_kline(symbol: str, limit: int = 120) -> list[dict[str, Any]]:
 
 def _build_symbol_analysis(symbol: str, hermes_mode: str = "normal") -> dict[str, Any]:
     normalized = _normalize_watch_symbol(symbol)
-    quotes = _fetch_quotes([normalized])
-    if not quotes:
-        raise HTTPException(status_code=404, detail="未获取到实时行情")
-    quote = analyze_quote(quotes[0], hermes_mode=hermes_mode)
+    quote_error = None
+    try:
+        quotes = _fetch_quotes([normalized])
+    except Exception as exc:
+        quotes = []
+        quote_error = f"实时行情获取失败: {exc}"
+    if quotes:
+        quote = analyze_quote(quotes[0], hermes_mode=hermes_mode)
+    else:
+        quote = analyze_quote(
+            {
+                "symbol": normalized,
+                "name": normalized,
+                "market": "CN",
+                "last_price": 0,
+                "change_pct": 0,
+                "change_abs": 0,
+                "prev_close": 0,
+                "open": 0,
+                "high": 0,
+                "low": 0,
+                "volume": 0,
+                "turnover": 0,
+                "bid": 0,
+                "ask": 0,
+                "spread_bps": 0,
+                "volume_ratio": 1,
+                "volatility_pct": 0,
+                "provider": "quote_unavailable",
+                "ts_event": None,
+            },
+            hermes_mode=hermes_mode,
+        )
+        if quote_error is None:
+            quote_error = "未获取到实时行情"
     kline_error = None
     try:
         kline_rows = _load_daily_kline(normalized)
@@ -369,6 +400,7 @@ def _build_symbol_analysis(symbol: str, hermes_mode: str = "normal") -> dict[str
         "quote": quote,
         "kline": kline_analysis,
         "kline_error": kline_error,
+        "quote_error": quote_error,
         "position": position,
         "decision": decision,
     }

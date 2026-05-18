@@ -231,6 +231,8 @@ const els = {
   recentSearches: document.getElementById("recentSearches"),
   workflowChecklist: document.getElementById("workflowChecklist"),
   overviewGrid: document.getElementById("overviewGrid"),
+  portfolioGrid: document.getElementById("portfolioGrid"),
+  portfolioRefreshStatus: document.getElementById("portfolioRefreshStatus"),
   selectedTitle: document.getElementById("selectedTitle"),
   marketStatus: document.getElementById("marketStatus"),
   lastPrice: document.getElementById("lastPrice"),
@@ -267,6 +269,9 @@ const state = {
   searchSuggestions: [],
   searchHighlightIndex: -1,
   decisionState: null,
+  decisionBySymbol: {},
+  decisionLoading: {},
+  portfolioLastRefreshedAt: null,
 };
 
 let streamTimer = null;
@@ -467,6 +472,46 @@ function createRecordFromCatalog(entry) {
     trend,
     spark: sparklineFromSeed(entry.symbol, trend),
   };
+}
+
+function createRecordFromSearchResult(entry) {
+  const catalogEntry = stockCatalog.find(item => item.symbol === entry.symbol);
+  if (catalogEntry) {
+    return createRecordFromCatalog(catalogEntry);
+  }
+  return {
+    symbol: entry.symbol,
+    name: entry.name,
+    market: entry.market || "CN",
+    last: 0,
+    changePct: 0,
+    changeAbs: 0,
+    open: 0,
+    high: 0,
+    low: 0,
+    prevClose: 0,
+    volume: 0,
+    turnover: 0,
+    bid: 0,
+    ask: 0,
+    volumeRatio: 1,
+    volatilityPct: 0,
+    sector: entry.market === "US" ? "US" : "A股",
+    trend: "neutral",
+    spark: sparklineFromSeed(entry.symbol, "neutral"),
+    provider: "catalog",
+  };
+}
+
+function ensureRecordFromSearchResult(entry) {
+  let record = findRecord(entry.symbol);
+  if (!record) {
+    record = createRecordFromSearchResult(entry);
+    symbols.push(record);
+  }
+  record.name = entry.name || record.name;
+  record.market = entry.market || record.market;
+  return record;
 }
 
 function ensureRecordLoaded(symbolOrEntry) {
@@ -1047,6 +1092,14 @@ function classByTechnicalScore(score) {
   return "neutral";
 }
 
+function isLiveCnRecord(record) {
+  return Boolean(record && record.market === "CN" && record.provider === "tencent_quote");
+}
+
+function isCnRecord(record) {
+  return Boolean(record && record.market === "CN");
+}
+
 function buildSvgPath(points) {
   if (points.length < 2) return "";
   return points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
@@ -1165,6 +1218,101 @@ function renderKlineChart(kline) {
       </svg>
     </div>
   `;
+}
+
+function renderKlineSummary(kline, klineError) {
+  if (!kline) {
+    return `
+      <div class="portfolio-kline-empty">
+        <strong>暂无K线</strong>
+        <p>真实 A 股行情刷新后加载。</p>
+      </div>
+    `;
+  }
+  if (!kline.bars?.length) {
+    return `
+      <div class="portfolio-kline-empty">
+        <strong>${kline.trend_label || "暂无K线数据"}</strong>
+        <p>${kline.volume_price_summary || "当前没有可绘制的 K 线数据。"}</p>
+        ${klineError ? `<p class="provider-meta danger-text">${klineError}</p>` : ""}
+      </div>
+    `;
+  }
+  const latestBar = kline.latest_bar || kline.bars.at(-1) || {};
+  return `
+    ${renderKlineChart(kline)}
+    <div class="portfolio-kline-stats">
+      <span>最新 ${formatShortDate(latestBar.date)}</span>
+      <span>技术分 ${kline.technical_score ?? "-"}</span>
+      <span>支撑 ${kline.support_price ?? "-"}</span>
+      <span>压力 ${kline.resistance_price ?? "-"}</span>
+    </div>
+  `;
+}
+
+function renderPortfolio() {
+  const records = getFollowedRecords();
+  if (!records.length) {
+    els.portfolioGrid.innerHTML = `<div class="provider-card"><strong>暂无关注股</strong><p>搜索股票并加入关注池后，这里会显示每只股票的行情、K 线和分析。</p></div>`;
+    els.portfolioRefreshStatus.textContent = "无关注股";
+    return;
+  }
+
+  const cnCount = records.filter(isCnRecord).length;
+  const liveCount = records.filter(isLiveCnRecord).length;
+  els.portfolioRefreshStatus.textContent = `${liveCount} 真实行情 · ${cnCount} A股可查K线 · ${formatTime(state.lastUpdateAt)}`;
+
+  els.portfolioGrid.innerHTML = records.map(record => {
+    const signal = deriveSignal(record);
+    const decisionState = state.decisionBySymbol[record.symbol];
+    const loading = state.decisionLoading[record.symbol];
+    const dataSource = record.provider === "tencent_quote" ? "真实行情" : "静态样本";
+    const decision = decisionState?.decision;
+    const kline = decisionState?.kline;
+    const klineError = decisionState?.kline_error;
+    const selected = record.symbol === state.selectedSymbol ? "active" : "";
+    const canLoadKline = isCnRecord(record);
+    const live = isLiveCnRecord(record);
+    const quoteError = decisionState?.quote_error;
+    const analysisText = decision
+      ? `${decision.decision} · ${(decision.reasons || []).slice(0, 2).join("；") || "暂无理由"}`
+      : live
+        ? loading ? "正在加载 K 线与投资判断..." : "等待分析刷新"
+        : "静态或非 A 股样本暂不生成真实 K 线分析";
+
+    return `
+      <article class="portfolio-card ${selected}" data-portfolio-symbol="${record.symbol}">
+        <div class="portfolio-card-head">
+          <div>
+            <p class="meta-label">${dataSource}</p>
+            <h4>${record.symbol} · ${record.name}</h4>
+            <p class="provider-meta">${record.sector} · ${record.market}</p>
+          </div>
+          <div class="portfolio-price-block">
+            <strong>${formatNumber(record.last)}</strong>
+            <span class="${classBySign(record.changePct)}">${record.changePct > 0 ? "+" : ""}${record.changePct.toFixed(2)}%</span>
+          </div>
+        </div>
+        <div class="portfolio-metrics">
+          <div><span>保护分</span><strong class="${classBySign(signal.protection - 50)}">${signal.protection}</strong></div>
+          <div><span>状态</span><strong>${signal.bias}</strong></div>
+          <div><span>量比</span><strong>${record.volumeRatio.toFixed(2)}</strong></div>
+          <div><span>点差</span><strong>${signal.spreadBps.toFixed(2)} bps</strong></div>
+          <div><span>成交额</span><strong>${formatCompact(record.turnover)}</strong></div>
+          <div><span>波动</span><strong>${record.volatilityPct.toFixed(2)}%</strong></div>
+        </div>
+        <div class="portfolio-kline">
+          ${canLoadKline ? renderKlineSummary(kline, klineError) : `<div class="portfolio-kline-empty"><strong>暂无真实K线</strong><p>当前标的是 ${dataSource}，需要接入对应市场历史行情后才能绘制。</p></div>`}
+        </div>
+        <div class="portfolio-analysis">
+          <strong>Hermes 分析</strong>
+          <p>${analysisText}</p>
+          ${quoteError && kline?.bars?.length ? `<p class="provider-meta danger-text">实时行情暂不可用，已先显示历史K线：${quoteError}</p>` : ""}
+          ${decision ? `<p class="provider-meta">浮盈亏 ${decision.pnl_pct ?? "-"}% · 成本 ${decision.avg_cost ?? "-"} · 止损 ${decision.stop_loss ?? "-"} · 目标 ${decision.target_price ?? "-"}</p>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
 }
 
 function renderKlinePanel() {
@@ -1298,8 +1446,10 @@ function renderHermesResponse(message) {
 
 function renderSelected() {
   const record = currentRecord();
+  state.decisionState = state.decisionBySymbol[record.symbol] || null;
   const signal = deriveSignal(record);
   renderOverview();
+  renderPortfolio();
   renderMarketStatus(record, signal);
   renderQuote(record, signal);
   renderSparkline(record, signal);
@@ -1316,18 +1466,120 @@ function renderSelected() {
 
 async function refreshDecisionState() {
   const record = currentRecord();
-  if (!record || record.market !== "CN" || record.provider !== "tencent_quote") {
+  state.decisionState = state.decisionBySymbol[record.symbol] || null;
+  if (!isCnRecord(record)) {
     state.decisionState = null;
     renderKlinePanel();
     renderPositionPanel();
     renderDecisionPanel();
+    renderPortfolio();
+    return;
+  }
+  if (state.decisionState?.loadedAt && Date.now() - state.decisionState.loadedAt < 60 * 1000) {
+    renderKlinePanel();
+    renderPositionPanel();
+    renderDecisionPanel();
+    renderPortfolio();
     return;
   }
   try {
-    state.decisionState = await apiRequest(`/api/analysis/decision?symbol=${encodeURIComponent(record.symbol)}&hermes_mode=${encodeURIComponent(state.hermesMode)}`);
+    state.decisionLoading[record.symbol] = true;
+    renderPortfolio();
+    state.decisionState = {
+      ...(await apiRequest(`/api/analysis/decision?symbol=${encodeURIComponent(record.symbol)}&hermes_mode=${encodeURIComponent(state.hermesMode)}`)),
+      loadedAt: Date.now(),
+    };
+    state.decisionBySymbol[record.symbol] = state.decisionState;
   } catch (error) {
     console.warn("decision analysis unavailable", error);
-    state.decisionState = null;
+    try {
+      const payload = await apiRequest(`/api/analysis/kline?symbol=${encodeURIComponent(record.symbol)}`);
+      state.decisionState = {
+        quote: null,
+        kline: payload.kline,
+        kline_error: null,
+        position: null,
+        decision: null,
+        loadedAt: Date.now(),
+        quote_error: error.message,
+      };
+      state.decisionBySymbol[record.symbol] = state.decisionState;
+    } catch (klineError) {
+      console.warn("kline analysis unavailable", klineError);
+      state.decisionState = {
+        quote: null,
+        kline: null,
+        kline_error: klineError.message,
+        position: null,
+        decision: null,
+        loadedAt: Date.now(),
+        quote_error: error.message,
+      };
+      state.decisionBySymbol[record.symbol] = state.decisionState;
+    }
+  } finally {
+    state.decisionLoading[record.symbol] = false;
+  }
+  renderKlinePanel();
+  renderPositionPanel();
+  renderDecisionPanel();
+  renderPortfolio();
+}
+
+async function refreshPortfolioAnalysis(options = {}) {
+  const force = Boolean(options.force);
+  const records = getFollowedRecords().filter(isCnRecord);
+  if (!records.length) {
+    renderPortfolio();
+    return;
+  }
+
+  const now = Date.now();
+  const staleAfterMs = 60 * 1000;
+  for (const record of records) {
+    if (!force && state.decisionBySymbol[record.symbol] && now - state.decisionBySymbol[record.symbol].loadedAt < staleAfterMs) {
+      continue;
+    }
+    if (state.decisionLoading[record.symbol]) {
+      continue;
+    }
+    state.decisionLoading[record.symbol] = true;
+    renderPortfolio();
+    try {
+      const payload = await apiRequest(`/api/analysis/decision?symbol=${encodeURIComponent(record.symbol)}&hermes_mode=${encodeURIComponent(state.hermesMode)}`);
+      state.decisionBySymbol[record.symbol] = { ...payload, loadedAt: Date.now() };
+      if (record.symbol === state.selectedSymbol) {
+        state.decisionState = state.decisionBySymbol[record.symbol];
+      }
+    } catch (error) {
+      console.warn(`portfolio analysis unavailable for ${record.symbol}`, error);
+      try {
+        const payload = await apiRequest(`/api/analysis/kline?symbol=${encodeURIComponent(record.symbol)}`);
+        state.decisionBySymbol[record.symbol] = {
+          loadedAt: Date.now(),
+          quote: null,
+          quote_error: error.message,
+          kline: payload.kline,
+          kline_error: null,
+          position: null,
+          decision: null,
+        };
+      } catch (klineError) {
+        console.warn(`portfolio kline unavailable for ${record.symbol}`, klineError);
+        state.decisionBySymbol[record.symbol] = {
+          loadedAt: Date.now(),
+          quote: null,
+          quote_error: error.message,
+          kline_error: klineError.message,
+          decision: null,
+          kline: null,
+        };
+      }
+    } finally {
+      state.decisionLoading[record.symbol] = false;
+      state.portfolioLastRefreshedAt = new Date();
+      renderPortfolio();
+    }
   }
   renderKlinePanel();
   renderPositionPanel();
@@ -1360,8 +1612,13 @@ async function handleSearch() {
     const remote = await apiRequest(`/api/search?q=${encodeURIComponent(raw)}&limit=8`);
     const first = remote.matches?.[0];
     if (first) {
-      state.apiReady = true;
-      await fetchLiveQuotes([first.symbol]);
+      ensureRecordFromSearchResult(first);
+      try {
+        await fetchLiveQuotes([first.symbol]);
+        state.apiReady = true;
+      } catch (quoteError) {
+        console.warn("live quote unavailable after search", quoteError);
+      }
       state.selectedSymbol = first.symbol;
       const added = addFollowed(first.symbol);
       registerRecentSearch(first.symbol);
@@ -1371,6 +1628,7 @@ async function handleSearch() {
       renderSelected();
       renderSystemStatus();
       await refreshDecisionState();
+      await refreshPortfolioAnalysis({ force: true });
       renderHermesResponse(
         added
           ? `已搜索到并自动加入关注：${first.symbol} · ${first.name}。Hermes 将持续刷新其实时行情。`
@@ -1398,6 +1656,7 @@ async function handleSearch() {
   renderSelected();
   renderSystemStatus();
   await refreshDecisionState();
+  await refreshPortfolioAnalysis({ force: true });
   renderHermesResponse(
     added
       ? `已搜索到并自动加入关注：${matched.symbol}。Hermes 将优先监控这只股票的急跌、放量和崩坏风险。`
@@ -1419,6 +1678,7 @@ function simulateStreamTick() {
   renderWatchlist();
   renderSelected();
   renderSystemStatus();
+  renderPortfolio();
 }
 
 function ensureStream() {
@@ -1435,6 +1695,7 @@ function ensureStream() {
     }
     simulateStreamTick();
     await refreshDecisionState();
+    refreshPortfolioAnalysis();
   }, 5000);
 }
 
@@ -1497,6 +1758,7 @@ els.followBtn.addEventListener("click", () => {
   renderWatchlist();
   renderSystemStatus();
   renderHermesResponse(added ? `${record.symbol} 已加入关注池，Hermes 将持续跟踪其异动。` : `${record.symbol} 已经在关注池中。`);
+  refreshPortfolioAnalysis();
 });
 
 els.unfollowBtn.addEventListener("click", () => {
@@ -1506,6 +1768,7 @@ els.unfollowBtn.addEventListener("click", () => {
   renderSelected();
   renderSystemStatus();
   renderHermesResponse(removed ? `${record.symbol} 已移出关注池。` : `${record.symbol} 当前不在关注池中。`);
+  refreshPortfolioAnalysis();
 });
 
 els.resetBtn.addEventListener("click", () => {
@@ -1518,6 +1781,7 @@ els.resetBtn.addEventListener("click", () => {
   renderSelected();
   renderSystemStatus();
   refreshDecisionState();
+  refreshPortfolioAnalysis({ force: true });
   renderHermesResponse("关注池已重置到 v1.0.0 默认配置。");
 });
 
@@ -1529,6 +1793,7 @@ els.marketScope.addEventListener("change", event => {
   renderSelected();
   renderSystemStatus();
   refreshDecisionState();
+  refreshPortfolioAnalysis();
 });
 
 els.hermesMode.addEventListener("change", event => {
@@ -1537,6 +1802,7 @@ els.hermesMode.addEventListener("change", event => {
   renderSelected();
   renderSystemStatus();
   refreshDecisionState();
+  refreshPortfolioAnalysis({ force: true });
   renderHermesResponse(`Hermes 已切换到 ${hermesModes[state.hermesMode].label}。`);
 });
 
@@ -1579,6 +1845,17 @@ els.priorityTable.addEventListener("click", event => {
   renderHermesResponse(`已切到优先级标的 ${state.selectedSymbol}，Hermes 将继续跟踪。`);
 });
 
+els.portfolioGrid.addEventListener("click", event => {
+  const card = event.target.closest("[data-portfolio-symbol]");
+  if (!card) return;
+  state.selectedSymbol = card.dataset.portfolioSymbol;
+  state.lastUpdateAt = new Date();
+  renderWatchlist();
+  renderSelected();
+  renderSystemStatus();
+  refreshDecisionState();
+});
+
 els.hermesAskBtn.addEventListener("click", () => {
   renderHermesResponse(hermesReply(els.hermesInput.value));
 });
@@ -1601,5 +1878,6 @@ renderRecentSearches();
 renderWatchlist();
 renderSelected();
 refreshDecisionState();
+refreshPortfolioAnalysis();
 renderHermesResponse("Hermes 已上线。先搜索股票并加入关注池，再由我负责盯风险和发提醒。");
 ensureStream();

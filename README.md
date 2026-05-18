@@ -119,6 +119,73 @@ HERMES_PYTHON_BIN=/path/to/python3.11 bash scripts/start_local_server.sh
 6. 如需录入持仓，用 `/api/positions` 写入成本、止损和目标价
 7. 如需生成告警，用 `/api/monitor/run-once` 手动运行一次监控
 
+## 简化股票监控
+
+如果不需要网页，可以使用本地简化版本：
+
+- 程序入口：`simplified_stock_monitor.py`
+- 双击启动：`disk/启动 简化股票监控.command`
+- 本地原生窗口版：`native/SimplifiedStockMonitorApp.swift`
+- 本地窗口双击启动：`disk/启动 简化股票监控图形版.command`
+
+这两个版本都不启动 FastAPI，不打开浏览器，直接调用 Python 模块完成股票搜索、关注池、行情、K 线、Hermes 风控、持仓、告警和夜间总结。
+
+如果想要“像网页一样但更简略”的本地窗口，双击：
+
+```text
+disk/启动 简化股票监控图形版.command
+```
+
+图形版提供：
+
+- 股票搜索并加入关注
+- 关注池列表
+- 实时行情刷新
+- Hermes 风控结果
+- 投资判断
+- 简化 K 线蜡烛图
+- 运行一次监控
+- 发送 outbox 告警
+
+图形版是 macOS AppKit 原生窗口，不是浏览器页面，也不启动本地服务器。
+
+如果想要纯终端菜单，双击：
+
+```text
+disk/启动 简化股票监控.command
+```
+
+终端版启动后会进入菜单：
+
+```text
+1. 搜索股票并加入关注
+2. 查看关注池
+3. 移出关注
+4. 查看实时行情
+5. 查看 Hermes 分析/K线/投资判断
+6. 录入持仓逻辑
+7. 配置 Hermes 告警
+8. 运行一次 Hermes 监控
+9. 发送 outbox 告警
+10. 生成夜间总结
+11. 查看运行状态
+0. 退出
+```
+
+也可以直接用命令：
+
+```bash
+python3 simplified_stock_monitor.py search 688766
+python3 simplified_stock_monitor.py add 688766.SH --note 芯片观察
+python3 simplified_stock_monitor.py quotes 688766.SH
+python3 simplified_stock_monitor.py analyze 688766.SH
+python3 simplified_stock_monitor.py position 688766.SH --quantity 100 --avg-cost 255.4 --stop-loss 238 --target-price 290
+python3 simplified_stock_monitor.py config-alerts --target pushplus:YOUR_TOKEN --cooldown-minutes 15 --min-level medium
+python3 simplified_stock_monitor.py run-monitor
+python3 simplified_stock_monitor.py send-alerts
+python3 simplified_stock_monitor.py nightly-summary
+```
+
 ## Hermes 连接方式
 
 这里的 Hermes 由三部分组成：

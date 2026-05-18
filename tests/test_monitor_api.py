@@ -235,3 +235,26 @@ def test_analysis_decision_returns_quote_when_kline_unavailable(tmp_path, monkey
     assert payload["kline"]["bars"] == []
     assert "K线获取失败" in payload["kline_error"]
     assert payload["decision"]["decision"] in {"观察", "减仓", "继续持有", "卖出"}
+
+
+def test_analysis_decision_returns_kline_when_quote_unavailable(tmp_path, monkeypatch):
+    harness = RuntimeHarness(tmp_path, monkeypatch)
+    save_kline_snapshot("688766.SH", sample_kline_rows())
+
+    def raise_quote_error(symbols):
+        raise RuntimeError("quote provider unavailable")
+
+    def raise_kline_error(symbol: str, limit: int = 120):
+        raise RuntimeError("akshare unavailable")
+
+    monkeypatch.setattr(server, "_fetch_quotes", raise_quote_error)
+    monkeypatch.setattr(server, "_fetch_daily_kline", raise_kline_error)
+
+    response = harness.client.get("/api/analysis/decision?symbol=688766.SH")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["quote"]["symbol"] == "688766.SH"
+    assert payload["quote"]["provider"] == "quote_unavailable"
+    assert "实时行情获取失败" in payload["quote_error"]
+    assert payload["kline"]["latest_bar"]["date"] == "2026-04-28"
+    assert payload["decision"]["decision"] in {"观察", "减仓", "继续持有", "卖出"}

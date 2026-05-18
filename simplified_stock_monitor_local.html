@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>简化股票监控</title>
+  <style>
+    :root {
+      --bg: #edf3f6;
+      --panel: #ffffff;
+      --ink: #12212b;
+      --muted: #62727d;
+      --line: #d9e4ea;
+      --green: #0e7c66;
+      --red: #c4493a;
+      --amber: #d08717;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 8%, rgba(14, 124, 102, 0.18), transparent 28%),
+        linear-gradient(135deg, #eef5f7, #f8fafb);
+    }
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 18px;
+      padding: 18px;
+    }
+    aside, main, .card {
+      background: rgba(255,255,255,0.88);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: 0 18px 42px rgba(35, 61, 76, 0.11);
+    }
+    aside { padding: 18px; }
+    main { padding: 20px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: 26px; margin-bottom: 8px; }
+    .muted { color: var(--muted); }
+    input, button, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 13px;
+      font: inherit;
+    }
+    button {
+      cursor: pointer;
+      background: var(--ink);
+      color: white;
+      margin-top: 10px;
+    }
+    button.secondary {
+      background: white;
+      color: var(--ink);
+    }
+    .stack { display: grid; gap: 12px; }
+    .watchlist button {
+      text-align: left;
+      background: #f7fafb;
+      color: var(--ink);
+      margin-top: 0;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .card { padding: 16px; }
+    .price {
+      font-size: 44px;
+      font-weight: 800;
+      margin: 8px 0;
+    }
+    .badge {
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: #eef4f6;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .badge.green { background: rgba(14,124,102,0.12); color: var(--green); }
+    .badge.red { background: rgba(196,73,58,0.12); color: var(--red); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .metric {
+      background: #f7fafb;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px;
+    }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    canvas {
+      width: 100%;
+      height: 320px;
+      background: #f8fbfc;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+    pre {
+      white-space: pre-wrap;
+      line-height: 1.55;
+      background: #f7fafb;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      min-height: 170px;
+    }
+    @media (max-width: 900px) {
+      .app, .hero { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <h1>简化股票监控</h1>
+      <p class="muted">本地文件版，不启动服务器。直接读取腾讯行情和 K 线接口。</p>
+      <div class="stack">
+        <input id="symbolInput" value="688766" placeholder="输入 A 股代码，如 688766" />
+        <select id="modeSelect">
+          <option value="normal">正常监控</option>
+          <option value="defensive">防守优先</option>
+          <option value="crash">崩坏守卫</option>
+        </select>
+        <button id="loadBtn">加载行情与K线</button>
+        <button id="addBtn" class="secondary">加入本地关注池</button>
+      </div>
+      <h3 style="margin-top:22px;">本地关注池</h3>
+      <div id="watchlist" class="watchlist stack"></div>
+    </aside>
+
+    <main>
+      <div class="hero">
+        <section class="card">
+          <p class="muted">实时行情</p>
+          <h2 id="title">未加载</h2>
+          <div id="price" class="price">--</div>
+          <span id="changeBadge" class="badge">--</span>
+        </section>
+        <section class="card">
+          <p class="muted">Hermes 简化风控</p>
+          <h2 id="riskTitle">--</h2>
+          <p id="riskSummary">等待加载。</p>
+          <span id="riskBadge" class="badge">--</span>
+        </section>
+      </div>
+
+      <section class="grid">
+        <div class="metric"><span>开盘</span><strong id="open">--</strong></div>
+        <div class="metric"><span>最高</span><strong id="high">--</strong></div>
+        <div class="metric"><span>最低</span><strong id="low">--</strong></div>
+        <div class="metric"><span>量比</span><strong id="volumeRatio">--</strong></div>
+      </section>
+
+      <section class="card" style="margin-top:16px;">
+        <h3>简化 K 线</h3>
+        <canvas id="klineCanvas" width="900" height="320"></canvas>
+        <p id="klineNote" class="muted">暂无 K 线。</p>
+      </section>
+
+      <section class="card" style="margin-top:16px;">
+        <h3>投资判断</h3>
+        <pre id="decision">等待加载。</pre>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const els = {
+      symbolInput: document.getElementById("symbolInput"),
+      modeSelect: document.getElementById("modeSelect"),
+      loadBtn: document.getElementById("loadBtn"),
+      addBtn: document.getElementById("addBtn"),
+      watchlist: document.getElementById("watchlist"),
+      title: document.getElementById("title"),
+      price: document.getElementById("price"),
+      changeBadge: document.getElementById("changeBadge"),
+      riskTitle: document.getElementById("riskTitle"),
+      riskSummary: document.getElementById("riskSummary"),
+      riskBadge: document.getElementById("riskBadge"),
+      open: document.getElementById("open"),
+      high: document.getElementById("high"),
+      low: document.getElementById("low"),
+      volumeRatio: document.getElementById("volumeRatio"),
+      klineCanvas: document.getElementById("klineCanvas"),
+      klineNote: document.getElementById("klineNote"),
+      decision: document.getElementById("decision"),
+    };
+
+    function inferSymbol(raw) {
+      const code = raw.trim().toUpperCase().replace(/\.(SH|SZ)$/, "");
+      const market = code.startsWith("6") || code.startsWith("9") ? "sh" : "sz";
+      return { code, market, symbol: `${code}.${market === "sh" ? "SH" : "SZ"}`, tencent: `${market}${code}` };
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`加载失败：${url}`));
+        document.head.appendChild(script);
+        setTimeout(() => script.remove(), 1000);
+      });
+    }
+
+    async function fetchQuote(target) {
+      await loadScript(`https://qt.gtimg.cn/q=${target.tencent}&_=${Date.now()}`);
+      const raw = window[`hq_str_${target.tencent}`];
+      if (!raw) throw new Error("未获取到行情。");
+      const f = raw.split("~");
+      const last = Number(f[3] || 0);
+      const prev = Number(f[4] || 0);
+      const open = Number(f[5] || 0);
+      const volume = Number(f[6] || 0);
+      const bid = Number(f[9] || last);
+      const ask = Number(f[19] || last);
+      const high = Number(f[33] || last);
+      const low = Number(f[34] || last);
+      const volumeRatio = Number(f[38] || 0);
+      const change = last - prev;
+      return {
+        symbol: target.symbol,
+        name: f[1] || target.symbol,
+        last,
+        prev,
+        open,
+        high,
+        low,
+        volume,
+        bid,
+        ask,
+        volumeRatio,
+        changePct: prev ? change / prev * 100 : 0,
+        volatilityPct: prev ? (high - low) / prev * 100 : 0,
+      };
+    }
+
+    async function fetchKline(target) {
+      const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${target.tencent},day,,,120,qfq&_=${Date.now()}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`K线接口失败：${response.status}`);
+      const payload = await response.json();
+      const data = payload.data?.[target.tencent] || {};
+      const rows = data.qfqday || data.day || [];
+      return rows.map(item => ({
+        date: item[0],
+        open: Number(item[1]),
+        close: Number(item[2]),
+        high: Number(item[3]),
+        low: Number(item[4]),
+        volume: Number(item[5]),
+      }));
+    }
+
+    function analyze(quote, bars) {
+      const modeBias = { normal: 0, defensive: 8, crash: 16 }[els.modeSelect.value] || 0;
+      const spreadBps = quote.last ? ((quote.ask - quote.bid) / quote.last) * 10000 : 0;
+      const momentum = Math.max(0, Math.min(100, Math.round(50 + quote.changePct * 10 + (quote.volumeRatio - 1) * 12)));
+      const liquidity = Math.max(0, Math.min(100, Math.round(100 - spreadBps * 12 + quote.volumeRatio * 5)));
+      const volatility = Math.max(0, Math.min(100, Math.round(100 - Math.abs(quote.volatilityPct - 2.2) * 18 - modeBias)));
+      const protection = Math.max(0, Math.min(100, Math.round(58 + quote.changePct * 12 + (quote.volumeRatio - 1) * 14 - Math.max(quote.volatilityPct - 3.1, 0) * 14 - modeBias)));
+      let level = "low";
+      let bias = "继续观察";
+      if (protection <= 35 || quote.changePct <= -3 || quote.volatilityPct >= 4) {
+        level = "high";
+        bias = "崩坏警戒";
+      } else if (protection <= 55 || quote.changePct <= -1.5) {
+        level = "medium";
+        bias = "防守观察";
+      } else if (protection >= 72 && quote.changePct > 0) {
+        bias = "趋势保持";
+      }
+      const closes = bars.map(b => b.close);
+      const ma = n => closes.length >= n ? closes.slice(-n).reduce((a, b) => a + b, 0) / n : null;
+      const ma20 = ma(20);
+      const ma60 = ma(60);
+      const trend = ma20 && ma60 && quote.last > ma20 && ma20 > ma60 ? "上升趋势" : ma20 && quote.last < ma20 ? "跌破MA20" : "震荡区间";
+      let decision = "观察";
+      if (protection <= 35 || quote.changePct <= -3) decision = "卖出/强制复核";
+      else if (protection <= 55) decision = "减仓/防守";
+      else if (protection >= 72 && ma20 && quote.last > ma20) decision = "继续持有";
+      return { momentum, liquidity, volatility, protection, level, bias, spreadBps, trend, ma20, ma60, decision };
+    }
+
+    function drawKline(bars) {
+      const ctx = els.klineCanvas.getContext("2d");
+      const width = els.klineCanvas.width;
+      const height = els.klineCanvas.height;
+      ctx.clearRect(0, 0, width, height);
+      if (!bars.length) return;
+      const visible = bars.slice(-60);
+      const maxPrice = Math.max(...visible.map(b => b.high));
+      const minPrice = Math.min(...visible.map(b => b.low));
+      const span = Math.max(maxPrice - minPrice, 1);
+      const pad = 20;
+      const chartH = height - pad * 2;
+      const gap = (width - pad * 2) / visible.length;
+      const y = price => pad + (maxPrice - price) / span * chartH;
+      visible.forEach((bar, index) => {
+        const x = pad + gap * index + gap / 2;
+        const color = bar.close >= bar.open ? "#0e7c66" : "#c4493a";
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x, y(bar.high));
+        ctx.lineTo(x, y(bar.low));
+        ctx.stroke();
+        const top = y(Math.max(bar.open, bar.close));
+        const bottom = y(Math.min(bar.open, bar.close));
+        ctx.fillRect(x - Math.max(2, gap * 0.28), top, Math.max(3, gap * 0.56), Math.max(2, bottom - top));
+      });
+      const latest = visible.at(-1);
+      els.klineNote.textContent = `${latest.date} | 开 ${latest.open} 收 ${latest.close} 高 ${latest.high} 低 ${latest.low} | ${visible.length} 根`;
+    }
+
+    async function loadAll() {
+      const target = inferSymbol(els.symbolInput.value);
+      els.loadBtn.textContent = "加载中...";
+      try {
+        const quote = await fetchQuote(target);
+        let bars = [];
+        try {
+          bars = await fetchKline(target);
+        } catch (error) {
+          els.klineNote.textContent = error.message;
+        }
+        const signal = analyze(quote, bars);
+        els.title.textContent = `${quote.symbol} ${quote.name}`;
+        els.price.textContent = quote.last.toFixed(2);
+        els.changeBadge.textContent = `${quote.changePct.toFixed(2)}%`;
+        els.changeBadge.className = `badge ${quote.changePct >= 0 ? "green" : "red"}`;
+        els.open.textContent = quote.open.toFixed(2);
+        els.high.textContent = quote.high.toFixed(2);
+        els.low.textContent = quote.low.toFixed(2);
+        els.volumeRatio.textContent = quote.volumeRatio.toFixed(2);
+        els.riskTitle.textContent = signal.bias;
+        els.riskSummary.textContent = `保护分 ${signal.protection}/100，风险等级 ${signal.level}，趋势 ${signal.trend}。`;
+        els.riskBadge.textContent = `Hermes ${signal.level}`;
+        els.riskBadge.className = `badge ${signal.level === "high" ? "red" : signal.level === "medium" ? "" : "green"}`;
+        els.decision.textContent = [
+          `结论：${signal.decision}`,
+          `保护分：${signal.protection}`,
+          `动量：${signal.momentum}`,
+          `流动性：${signal.liquidity}`,
+          `波动稳定：${signal.volatility}`,
+          `MA20：${signal.ma20 ? signal.ma20.toFixed(2) : "-"}`,
+          `MA60：${signal.ma60 ? signal.ma60.toFixed(2) : "-"}`,
+          `说明：该本地文件版不连接服务器，告警发送和持仓持久化请使用 Python 版。`
+        ].join("\n");
+        drawKline(bars);
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        els.loadBtn.textContent = "加载行情与K线";
+      }
+    }
+
+    function renderWatchlist() {
+      const items = JSON.parse(localStorage.getItem("simple-stock-watchlist") || "[]");
+      els.watchlist.innerHTML = items.length ? "" : `<p class="muted">暂无关注。</p>`;
+      items.forEach(symbol => {
+        const button = document.createElement("button");
+        button.className = "secondary";
+        button.textContent = symbol;
+        button.onclick = () => {
+          els.symbolInput.value = symbol;
+          loadAll();
+        };
+        els.watchlist.appendChild(button);
+      });
+    }
+
+    els.loadBtn.onclick = loadAll;
+    els.addBtn.onclick = () => {
+      const target = inferSymbol(els.symbolInput.value);
+      const items = JSON.parse(localStorage.getItem("simple-stock-watchlist") || "[]");
+      if (!items.includes(target.symbol)) items.push(target.symbol);
+      localStorage.setItem("simple-stock-watchlist", JSON.stringify(items));
+      renderWatchlist();
+    };
+    els.symbolInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") loadAll();
+    });
+    renderWatchlist();
+  </script>
+</body>
+</html>
