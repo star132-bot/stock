@@ -1,0 +1,45 @@
+# Hermes cron example for the in-repo stock-hourly-master-monitor skill.
+#
+# This file is intentionally committed with the repository so another user can
+# clone stock-realtime-dashboard and recreate the hourly monitoring job.
+# Replace the project path and symbols if your clone lives somewhere else.
+
+name: stock-hourly-master-monitor 688766.SH
+schedule: every 1h
+deliver: origin
+model:
+  provider: minimax
+  model: MiniMax-M2.7-highspeed
+skills: []
+
+prompt: |
+  你是 stock-realtime-dashboard 的股票监控代理。
+
+  项目路径：/Users/starfeld/project/stock-realtime-dashboard
+  监控标的：688766.SH
+
+  每小时执行一次项目内 skill 脚本：
+  cd /Users/starfeld/project/stock-realtime-dashboard && python skills/stock-hourly-master-monitor/scripts/hourly_master_monitor.py --symbols 688766.SH --target origin
+
+  执行后读取脚本输出 JSON：
+  1. 读取 compact_results，判断当前价格、日内涨跌、上一小时变化、量比、触发项。
+  2. 读取 master_prompt，用 MiniMax-M2.7-highspeed 或当前可用模型生成 300 字以内中文投资可行性分析。
+  3. 如果 alert_required=true，必须向当前聊天发送巨大波动提醒，并包含触发原因、仓位/止损建议和风险提示。
+  4. 如果 alert_required=false，只记录运行结果，不要打扰用户。
+
+  分析要求：像专业股票大师一样，但风险优先；明确“可观察 / 可小仓试错 / 暂不适合 / 需要减仓或止损”；不要编造新闻或财报。
+  结尾必须注明：这不是投资建议，只是基于当前数据的风控分析。
+
+command_reference: >-
+  cd /Users/starfeld/project/stock-realtime-dashboard && python
+  skills/stock-hourly-master-monitor/scripts/hourly_master_monitor.py
+  --symbols 688766.SH --target origin
+
+create_with_hermes_tool:
+  action: create
+  name: stock-hourly-master-monitor 688766.SH
+  schedule: every 1h
+  deliver: origin
+  model:
+    provider: minimax
+    model: MiniMax-M2.7-highspeed

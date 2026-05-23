@@ -139,6 +139,7 @@ def test_analysis_kline_uses_cached_snapshot_when_live_fetch_fails(tmp_path, mon
         raise RuntimeError("akshare unavailable")
 
     monkeypatch.setattr(server, "_fetch_daily_kline", raise_kline_error)
+    monkeypatch.setattr(server, "_fetch_tencent_daily_kline", raise_kline_error)
 
     response = harness.client.get("/api/analysis/kline?symbol=688766.SH")
     assert response.status_code == 200
@@ -183,6 +184,7 @@ def test_analysis_decision_uses_cached_snapshot_when_live_fetch_fails(tmp_path, 
         raise RuntimeError("akshare unavailable")
 
     monkeypatch.setattr(server, "_fetch_daily_kline", raise_kline_error)
+    monkeypatch.setattr(server, "_fetch_tencent_daily_kline", raise_kline_error)
 
     response = harness.client.get("/api/analysis/decision?symbol=688766.SH")
     assert response.status_code == 200
@@ -227,6 +229,7 @@ def test_analysis_decision_returns_quote_when_kline_unavailable(tmp_path, monkey
         raise RuntimeError("akshare unavailable")
 
     monkeypatch.setattr(server, "_fetch_daily_kline", raise_kline_error)
+    monkeypatch.setattr(server, "_fetch_tencent_daily_kline", raise_kline_error)
 
     response = harness.client.get("/api/analysis/decision?symbol=688766.SH")
     assert response.status_code == 200
@@ -249,6 +252,7 @@ def test_analysis_decision_returns_kline_when_quote_unavailable(tmp_path, monkey
 
     monkeypatch.setattr(server, "_fetch_quotes", raise_quote_error)
     monkeypatch.setattr(server, "_fetch_daily_kline", raise_kline_error)
+    monkeypatch.setattr(server, "_fetch_tencent_daily_kline", raise_kline_error)
 
     response = harness.client.get("/api/analysis/decision?symbol=688766.SH")
     assert response.status_code == 200

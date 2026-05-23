@@ -35,6 +35,18 @@ from monitor_runtime import (
     utc_now_iso,
 )
 from technical_analysis import analyze_kline_rows, analyze_position_logic
+from stock_analysis_service import (
+    StockAnalysisError,
+    build_capability_answer_template,
+    build_stock_analysis,
+    build_stock_query,
+    get_realtime_monitor_status,
+    load_monitor_jobs,
+    load_stock_history,
+    register_stock_monitor,
+    run_registered_monitors,
+    update_monitor_job,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 CATALOG_CACHE = runtime_dir() / "a_stock_catalog.json"
@@ -64,6 +76,25 @@ class PositionUpsertRequest(BaseModel):
     target_price: float | None = Field(default=None, ge=0)
     horizon: str | None = None
     thesis: str | None = None
+
+
+class StockMonitorRequest(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    interval_minutes: int = Field(default=30, ge=1, le=1440)
+    hermes_mode: str = "normal"
+    note: str | None = None
+    target: str | None = None
+    thresholds: dict[str, float] | None = None
+    run_now: bool = True
+
+
+class StockMonitorPatchRequest(BaseModel):
+    enabled: bool | None = None
+    interval_minutes: int | None = Field(default=None, ge=1, le=1440)
+    hermes_mode: str | None = None
+    note: str | None = None
+    target: str | None = None
+    thresholds: dict[str, float] | None = None
 
 
 def _http_session() -> requests.Session:
@@ -726,3 +757,124 @@ def monitor_run_once(hermes_mode: str = Query(default="normal")) -> dict[str, An
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"监控循环执行失败: {exc}") from exc
+
+
+@app.get("/api/hermes/stock-monitors")
+def hermes_stock_monitors() -> dict[str, Any]:
+    return {"items": load_monitor_jobs()}
+
+
+@app.post("/api/hermes/stock-monitors")
+def create_hermes_stock_monitor(payload: StockMonitorRequest) -> dict[str, Any]:
+    try:
+        job = register_stock_monitor(
+            symbol=payload.symbol,
+            interval_minutes=payload.interval_minutes,
+            hermes_mode=payload.hermes_mode,
+            note=payload.note,
+            target=payload.target,
+            thresholds=payload.thresholds,
+        )
+        run_result = None
+        if payload.run_now:
+            run_result = run_registered_monitors(symbols=[job["symbol"]], only_due=False, hermes_mode=payload.hermes_mode)
+        return {"item": job, "run_result": run_result}
+    except StockAnalysisError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hermes 股票监控创建失败: {exc}") from exc
+
+
+@app.patch("/api/hermes/stock-monitors/{symbol}")
+def patch_hermes_stock_monitor(symbol: str, payload: StockMonitorPatchRequest) -> dict[str, Any]:
+    try:
+        updates = payload.model_dump(exclude_unset=True)
+        item = update_monitor_job(symbol, updates)
+        return {"item": item}
+    except StockAnalysisError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hermes 股票监控更新失败: {exc}") from exc
+
+
+@app.post("/api/hermes/stock-monitors/run")
+def run_hermes_stock_monitors(
+    symbols: str | None = Query(default=None),
+    only_due: bool = Query(default=True),
+    hermes_mode: str | None = Query(default=None),
+    queue_alerts: bool = Query(default=True),
+) -> dict[str, Any]:
+    requested = [item.strip() for item in (symbols or "").split(",") if item.strip()]
+    try:
+        return run_registered_monitors(
+            symbols=requested or None,
+            only_due=only_due,
+            hermes_mode=hermes_mode,
+            queue_alerts=queue_alerts,
+        )
+    except StockAnalysisError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hermes 股票监控运行失败: {exc}") from exc
+
+
+@app.get("/api/hermes/stock-monitors/realtime/status")
+def hermes_realtime_monitor_status() -> dict[str, Any]:
+    return {"status": get_realtime_monitor_status()}
+
+
+@app.get("/api/hermes/stock-monitors/{symbol}/history")
+def hermes_stock_history(symbol: str, limit: int = Query(default=240, ge=1, le=2000)) -> dict[str, Any]:
+    try:
+        normalized = _normalize_watch_symbol(symbol)
+        history = load_stock_history(normalized, limit=limit)
+        return {"symbol": normalized, "items": history, "count": len(history)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hermes 股票历史读取失败: {exc}") from exc
+
+
+@app.get("/api/hermes/stock-monitors/{symbol}/query")
+def hermes_stock_query(
+    symbol: str,
+    lookback: int = Query(default=240, ge=1, le=2000),
+    hermes_mode: str = Query(default="normal"),
+    refresh: bool = Query(default=False),
+) -> dict[str, Any]:
+    try:
+        return build_stock_query(symbol, lookback=lookback, hermes_mode=hermes_mode, refresh=refresh)
+    except StockAnalysisError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hermes 股票查询失败: {exc}") from exc
+
+
+@app.get("/api/hermes/stock-monitors/{symbol}/analysis")
+def hermes_stock_analysis(
+    symbol: str,
+    lookback: int = Query(default=240, ge=1, le=2000),
+    hermes_mode: str = Query(default="normal"),
+    refresh: bool = Query(default=False),
+) -> dict[str, Any]:
+    try:
+        return build_stock_analysis(symbol, lookback=lookback, hermes_mode=hermes_mode, refresh=refresh)
+    except StockAnalysisError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hermes 股票分析失败: {exc}") from exc
+
+
+@app.get("/api/hermes/capabilities")
+def hermes_capabilities() -> dict[str, Any]:
+    return build_capability_answer_template()

@@ -193,6 +193,7 @@ python3 simplified_stock_monitor.py nightly-summary
 - 前端 Hermes 控制台：页面里的风险展示、快讯和问答区
 - 后端 Hermes 风控引擎：`server.py`、`alert_engine.py`、`technical_analysis.py`
 - Hermes 告警发送器：`sender.py` 和 `scripts/send_pending_alerts.py`
+- Hermes 股票监控 runner：`scripts/hermes_stock_monitor.py`
 
 ### 1. 配置关注股票
 
@@ -237,6 +238,81 @@ curl -X POST 'http://127.0.0.1:8130/api/monitor/run-once?hermes_mode=normal'
 ```bash
 python3 scripts/send_pending_alerts.py
 ```
+
+## Hermes 自动股票监控与本地分析
+
+当用户指定“监控某只股票”时，推荐使用新的 Hermes runner。它会把股票加入关注池，按间隔采集实时行情和 K 线分析，把每次快照保存到本地 JSON/JSONL，并在后续分析趋势、投入或卖出时复用这些历史数据。
+
+登记股票并立即采集一次：
+
+```bash
+python3 scripts/hermes_stock_monitor.py add 688766.SH --interval-minutes 30 --run-now
+```
+
+运行一次所有到期监控任务：
+
+```bash
+python3 scripts/hermes_stock_monitor.py run
+```
+
+后台启动实时监控，每 60 秒检查一次是否有到期任务：
+
+```bash
+python3 scripts/hermes_stock_monitor.py start --poll-seconds 60
+```
+
+查看或停止后台实时监控：
+
+```bash
+python3 scripts/hermes_stock_monitor.py status
+python3 scripts/hermes_stock_monitor.py stop
+```
+
+前台常驻轮询，每 60 秒检查一次是否有到期任务：
+
+```bash
+python3 scripts/hermes_stock_monitor.py loop --poll-seconds 60
+```
+
+查询某只股票最新信息、历史摘要和分析结论：
+
+```bash
+python3 scripts/hermes_stock_monitor.py query 688766.SH
+```
+
+基于本地历史生成趋势和买卖分析：
+
+```bash
+python3 scripts/hermes_stock_monitor.py analyze 688766.SH --lookback 240
+```
+
+展示 Hermes 对用户说明自身能力的回答模板：
+
+```bash
+python3 scripts/hermes_stock_monitor.py capabilities --text
+```
+
+数据保存位置：
+
+- `.runtime/hermes_stock_monitors.json`: 用户登记的监控任务
+- `.runtime/hermes_realtime_monitor.json`: 后台实时监控进程状态
+- `.runtime/hermes_realtime_monitor.log`: 后台实时监控日志
+- `.runtime/stock_snapshots/<SYMBOL>.jsonl`: 每只股票的历史快照
+- `.runtime/stock_latest/<SYMBOL>.json`: 每只股票最新快照
+- `.runtime/analysis_history.jsonl`: 项目统一分析历史
+- `.runtime/outbox.json`: 触发阈值后的待发送告警
+
+对应 API：
+
+- `POST /api/hermes/stock-monitors`: 登记某只股票监控，可选 `run_now`
+- `POST /api/hermes/stock-monitors/run`: 运行一次到期任务
+- `GET /api/hermes/stock-monitors/realtime/status`: 查看后台实时监控状态
+- `GET /api/hermes/stock-monitors/{symbol}/query`: 查询最新快照、历史摘要和分析结论
+- `GET /api/hermes/stock-monitors/{symbol}/history`: 读取本地历史快照
+- `GET /api/hermes/stock-monitors/{symbol}/analysis`: 生成趋势与投入/卖出分析
+- `GET /api/hermes/capabilities`: 获取 Hermes 能力说明模板
+
+分析会使用项目内置风控分、K 线趋势、支撑/压力、RSI14、MACD、Bollinger、均线排列、历史价格变化和量比变化。它不能保证未来走势准确，但会保证结论基于本地真实快照和明确规则，不编造新闻、财报或消息面。
 
 重试失败告警：
 
