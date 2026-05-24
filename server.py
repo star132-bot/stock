@@ -51,6 +51,8 @@ from stock_analysis_service import (
 BASE_DIR = Path(__file__).resolve().parent
 CATALOG_CACHE = runtime_dir() / "a_stock_catalog.json"
 CN_SYMBOL_RE = re.compile(r"^\d{6}\.(SH|SZ)$")
+QUOTE_TIMEOUT_SEC = 5
+KLINE_TIMEOUT_SEC = 5
 
 app = FastAPI(title="Hermes Stock Sentinel API")
 app.mount("/assets", StaticFiles(directory=BASE_DIR), name="assets")
@@ -248,7 +250,7 @@ def _fetch_quotes(symbols: list[str]) -> list[dict[str, Any]]:
     if not symbols:
         return []
     query = ",".join(_tencent_symbol(symbol) for symbol in symbols)
-    response = _http_session().get(f"https://qt.gtimg.cn/q={query}", timeout=15)
+    response = _http_session().get(f"https://qt.gtimg.cn/q={query}", timeout=QUOTE_TIMEOUT_SEC)
     response.raise_for_status()
     text = response.content.decode("gbk", errors="ignore")
     quotes: list[dict[str, Any]] = []
@@ -314,7 +316,7 @@ def _fetch_tencent_daily_kline(symbol: str, limit: int = 120) -> list[dict[str, 
     response = _http_session().get(
         url,
         params={"param": f"{tencent_symbol},day,,,{limit},qfq"},
-        timeout=15,
+        timeout=KLINE_TIMEOUT_SEC,
     )
     response.raise_for_status()
     payload = response.json()

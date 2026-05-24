@@ -302,6 +302,30 @@ def load_latest_snapshot(symbol: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _snapshot_has_valid_quote(snapshot: dict[str, Any] | None) -> bool:
+    quote = (snapshot or {}).get("quote") or {}
+    return _to_float(quote.get("last_price")) > 0 and quote.get("provider") != "quote_unavailable"
+
+
+def _reuse_previous_quote_if_needed(analysis: dict[str, Any], previous: dict[str, Any] | None) -> dict[str, Any]:
+    quote = analysis.get("quote") or {}
+    if _to_float(quote.get("last_price")) > 0 or not _snapshot_has_valid_quote(previous):
+        return analysis
+
+    previous_quote = deepcopy((previous or {}).get("quote") or {})
+    if not previous_quote:
+        return analysis
+
+    quote_error = analysis.get("quote_error") or "实时行情不可用"
+    previous_quote["provider"] = "cached_quote_fallback"
+    previous_quote["cached_from_recorded_at"] = previous.get("recorded_at") if previous else None
+    previous_quote["fallback_reason"] = quote_error
+    reused = deepcopy(analysis)
+    reused["quote"] = previous_quote
+    reused["quote_error"] = f"{quote_error}; 已复用上一条有效行情快照"
+    return reused
+
+
 def load_realtime_monitor_state() -> dict[str, Any]:
     state = _read_json(realtime_monitor_state_path(), {})
     return state if isinstance(state, dict) else {}
@@ -406,6 +430,7 @@ def collect_stock_snapshot(
     normalized = normalize_symbol(symbol)
     previous = load_latest_snapshot(normalized)
     analysis = server._build_symbol_analysis(normalized, hermes_mode=hermes_mode)
+    analysis = _reuse_previous_quote_if_needed(analysis, previous)
     snapshot = {
         "recorded_at": utc_now_iso(),
         "source": source,

@@ -110,6 +110,33 @@ def test_run_registered_monitors_queues_alert_when_threshold_triggers(tmp_path, 
     assert load_outbox()[0]["target"] == "pushplus:test-token"
 
 
+def test_quote_failure_reuses_previous_valid_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_STOCK_RUNTIME_DIR", str(tmp_path / ".runtime"))
+    monkeypatch.setattr(server, "_build_symbol_analysis", lambda symbol, hermes_mode="normal": sample_analysis(symbol))
+
+    register_stock_monitor("688766.SH")
+    first = run_registered_monitors(symbols=["688766.SH"], only_due=False)
+    assert first["results"][0]["quote"]["last_price"] == 114.15
+
+    failed_payload = sample_analysis()
+    failed_payload["quote"] = {
+        **failed_payload["quote"],
+        "last_price": 0,
+        "provider": "quote_unavailable",
+    }
+    failed_payload["quote_error"] = "实时行情获取失败: DNS"
+    monkeypatch.setattr(server, "_build_symbol_analysis", lambda symbol, hermes_mode="normal": failed_payload)
+
+    second = run_registered_monitors(symbols=["688766.SH"], only_due=False)
+    snapshot = second["results"][0]
+
+    assert snapshot["quote"]["last_price"] == 114.15
+    assert snapshot["quote"]["provider"] == "cached_quote_fallback"
+    assert snapshot["comparison"]["interval_change_pct"] == 0.0
+    assert "interval_price_move" not in snapshot["comparison"]["triggers"]
+    assert "已复用上一条有效行情快照" in snapshot["quote_error"]
+
+
 def test_query_returns_latest_summary_and_analysis(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_STOCK_RUNTIME_DIR", str(tmp_path / ".runtime"))
     monkeypatch.setattr(server, "_build_symbol_analysis", lambda symbol, hermes_mode="normal": sample_analysis(symbol))
